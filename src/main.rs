@@ -3,6 +3,8 @@ use std::fmt::{Debug, Display, Formatter};
 use std::time::Duration;
 
 use crate::Number::Two;
+use std::ops::Deref;
+use std::rc::Rc;
 
 fn main() {
     array_slice();
@@ -52,6 +54,13 @@ fn main() {
     event_registry_example();
     lifetime_example_one();
     generic_lifetime_in_functions();
+    recursive_type_with_box();
+    using_box_like_a_reference();
+    defining_our_own_smart_pointer();
+    implicit_deref_coercions_with_functions_and_methods();
+    running_code_on_cleanup_with_the_drop_trait();
+    dropping_a_value_early_with_std_mem_drop();
+    rc_the_reference_counted_smart_pointer();
 }
 
 
@@ -457,7 +466,6 @@ fn closure_example() {
 
 fn capturing_example() {
     //TODO: read againt this section
-    use std::mem;
 
     let color = String::from("green");
     let print = || eprintln!("color = {:?}", color);
@@ -854,3 +862,157 @@ fn generic_lifetime_in_functions() {
 }
 
 
+fn recursive_type_with_box() {
+    // Read more: https://doc.rust-lang.org/book/ch15-01-box.html
+    // Doesn't compile
+    // enum List {
+    //     Cons(i32, List),
+    //     Nil,
+    // }
+    
+    enum List {
+        Cons(i32, Box<List>),
+        Nil,
+    }
+    use List::{Cons, Nil};
+
+    let list = Cons(1, Box::new(Cons(2, Box::new(Cons(3, Box::new(Nil))))));
+}
+
+fn using_box_like_a_reference() {
+    // Read more:  https://doc.rust-lang.org/book/ch15-02-deref.html
+    
+    let x = 5;
+    let y = Box::new(x);
+    
+    assert_eq!(5, *y);
+}
+
+fn defining_our_own_smart_pointer() {
+    struct MyBox<T>(T);
+    
+    impl<T> MyBox<T> {
+        fn new(x: T) -> MyBox<T>  {
+            MyBox(x) 
+        }
+    }
+    
+    impl<T> Deref for MyBox<T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &(self.0)
+        }
+    }
+
+    let x = 5;
+    let y = MyBox::new(x);
+    
+    assert_eq!(5, *y)
+    // Behind the scenes Rust actually ran this code:
+    // *(y.deref())
+}
+
+fn implicit_deref_coercions_with_functions_and_methods() {
+    // More info: https://doc.rust-lang.org/book/ch15-02-deref.html#implicit-deref-coercions-with-functions-and-methods 
+    struct MyBox<T>(T);
+
+    impl<T> MyBox<T> {
+        fn new(x: T) -> MyBox<T>  {
+            MyBox(x)
+        }
+    }
+
+    impl<T> Deref for MyBox<T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &(self.0)
+        }
+    }
+    
+    fn hello(name: &str) {
+        println!("Hello, {}!", name); 
+    }
+    
+    let m = MyBox::new(String::from("Rust"));
+    //TODO: read this example again
+    hello(&m); //with deref coercion
+
+    // The (*m) dereferences the MyBox<String> into a String. 
+    // Then the & and [..] take a string slice of the String that is
+    // equal to the whole string to match the signature of hello. 
+    hello(&(*m)[..]); //without deref coercion
+}
+
+fn running_code_on_cleanup_with_the_drop_trait() {
+    // More info: https://doc.rust-lang.org/book/ch15-03-drop.html#running-code-on-cleanup-with-the-drop-trait
+    struct CustomSmartPointer {
+        data: String,
+    }
+    
+    impl Drop for CustomSmartPointer {
+        fn drop(&mut self) {
+           println!("Dropping CustomSmartPointer");
+        }
+    }
+    
+    let c = CustomSmartPointer {
+        data: String::from("Hello Smart Pointer"),
+    };
+    
+    {
+        let d = CustomSmartPointer {
+            data: String::from("Hello another Pointer"),
+        };
+    }
+    println!("CustomSmartPointer created.");
+}
+
+fn dropping_a_value_early_with_std_mem_drop() {
+    // More info: https://doc.rust-lang.org/book/ch15-03-drop.html#dropping-a-value-early-with-stdmemdrop
+    struct CustomSmartPointer {
+        data: String,
+    }
+
+    impl Drop for CustomSmartPointer {
+        fn drop(&mut self) {
+            println!("Dropping CustomSmartPointer");
+        }
+    }
+    
+    let c = CustomSmartPointer {
+        data: String::from("some data"),
+    };
+   
+    println!("CustomSmartPointer created!");
+    std::mem::drop(c); 
+    println!("CustomSmartPointer dropped before the end of main");
+    
+}
+
+fn rc_the_reference_counted_smart_pointer() {
+    enum List {
+        Cons(i32, Rc<List>),
+        Nil
+    }
+    
+    use List::{Cons, Nil};
+   
+    // Clone that increase the reference count 
+    let a = Rc::new(Cons(5, Rc::new(Cons(10, Rc::new(Nil)))));
+    eprintln!("count after creating a = {:?}", Rc::strong_count(&a));
+    let b = Cons(3, Rc::clone(&a));
+    eprintln!("count after creating b = {:?}", Rc::strong_count(&a));
+    {
+        let c = Cons(4, Rc::clone(&a));
+        eprintln!("count after creating c = {:?}", Rc::strong_count(&a));
+    }
+    eprintln!("count after c goes out of scope = {:?}", Rc::strong_count(&a));
+
+
+    // Deep Copy
+    let a1 = Rc::new(Cons(5, Rc::new(Cons(10, Rc::new(Nil)))));
+    let b1 = Cons(3, a1.clone());
+    let c1 = Cons(4, a1.clone());
+}
